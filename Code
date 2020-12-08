@@ -1,0 +1,436 @@
+#Load Libraries
+install.packages("grid")
+install.packages("ggplot2")
+
+library(spgwr)
+library(spatstat)
+library(tmap)
+library(gstat)
+library(sf)
+library(raster)
+library(rgdal)
+library(e1071)
+library(spdep)
+library(gtable)
+library(gridExtra)
+library(grid)
+library(ggplot2)
+library(rgeos)
+dir <- "/Users/narahtimmermans/Desktop/Geog418lab/Final_proj/Data"
+setwd(dir)
+getwd()
+
+
+
+#Reading in particulate matter dataset
+pm25 <- shapefile("Pm25Sample.shp") 
+pm25 <- spTransform(pm25, CRS("+init=epsg:26910"))
+
+
+plot(income.tracts)
+plot(pm25, col = "red", add = TRUE)
+
+###Data prep
+tmaptools::palette_explorer()
+#read in income CSV
+income <- read.csv("./Income.csv")
+head(income)
+colnames(income)
+
+#change column names
+newnames <- c("DAUID", "Income")
+colnames(income) <- newnames
+colnames(income)
+
+#Read in the dissemination tract shapefile
+census.tracts <- shapefile("BC_DA.shp") 
+head(census.tracts)
+#Merge the income dataset and the DA shapefile
+income.tracts <- merge(census.tracts,income, by = "DAUID") 
+income.tracts <- spTransform(income.tracts, CRS("+init=epsg:26910"))
+#Remove any NA's from the merged dataset
+income.tracts <- income.tracts[!is.na(income.tracts$Income),]
+#Study area map
+map_Income <- tm_shape(income.tracts) +
+  tm_polygons(col = "Income",
+              title = "Median Income",
+              style = "jenks",
+              palette = "Greens", n = 5) +
+  tm_shape(pm25) +
+  tm_dots(col= "PM25", palette = "Oranges", n=5, size = 0.2)+
+  tm_compass(type = "arrow", position = c(0.85, 0.85), size = 1.5) +
+  tm_scale_bar(width=0.15, position = "left")+
+  tm_legend(legend.outside=TRUE)+
+  tm_layout(main.title= "Vancouver Median Household Income and PM2.5 Concentrations", main.title.position = 0.1, main.title.size = 1.5)
+map_Income
+#Create choropleth map of pm
+shades <- auto.shading(pm25$PM25, n=6, cols = brewer.pal(6, 'Oranges'))
+choropleth(income.tracts,pm25$PM25, shades) #map the data with associated colours
+choro.legend(3864000, 1965000, shades) #add a legend (you might need to change the location)
+
+######################################################################################
+#1.0-- summary statistics
+#mean, median, mode, min, max
+Mean= round((mean(income$Income, na.rm=TRUE)), digits=3)
+Median=round((median(income$Income, na.rm=TRUE)), digits=3)
+Max=round((max(income$Income, na.rm=TRUE)),digits=3)
+Min=round((min(income$Income, na.rm=TRUE)),digits=3)
+SD=round((sd(income$Income, na.rm=TRUE)), digits=3)
+
+#make tables and figures
+data.for.table1 = c(mean.income,median.income,max.income, min.income, sd.income)
+data.for.table1 = data.frame(Mean, Median, Max, Min, SD)
+
+
+table1 <- tableGrob(data.for.table1, rows = "") #make a table "Graphical Object" (GrOb) 
+t1Caption <- textGrob("Table 1: Descriptive Statistics of 2016 Median Income in Vancouver \n (expressed in CAD)", gp = gpar(fontsize = 09))
+padding <- unit(4, "mm")
+table1 <- gtable_add_rows(table1,
+                          heights=grobHeight(t1Caption)+padding,
+                          pos=0)
+
+table1 <- gtable_add_grob(table1,
+                          t1Caption, t=1, l = 2, r = ncol(data.for.table1) + 1)
+
+grid.arrange(table1, newpage=TRUE)
+
+#PM2.5 summary stats
+mean.pm =round((mean(pm25$PM25)), digits=3)
+median.pm =round((median(pm25$PM25)),digits=3)
+sd.pm=round((sd(pm25$PM25, na.rm=TRUE)), digits=3)
+max.pm =round((max(pm25$PM25, na.rm=TRUE)), digits=3)
+min.pm =round((min(pm25$PM25, na.rm=TRUE)), digits=3)
+
+#pm tables
+data.for.table3 = data.frame(mean.pm,median.pm, max.pm, min.pm, sd.pm)
+
+table3 <- tableGrob(data.for.table3, rows=c(""))
+t3Caption <- textGrob("Table 2: Descriptive Statistics of Annual \n Average PM2.5 in Vancouver", gp = gpar(fontsize = 09))
+padding <- unit(4, "mm")
+
+table3 <- gtable_add_rows(table3, 
+                          heights = grobHeight(t3Caption) + padding, 
+                          pos = 0)
+
+table3 <- gtable_add_grob(table3,
+                          t3Caption, t =1, l = 2, r = ncol(data.for.table3) + 1)
+
+grid.arrange(table3, newpage = TRUE)
+
+
+######################################################################################
+#2.0--Moran's I test
+
+income.nb <- poly2nb(income.tracts)
+income.net <- nb2lines(income.nb, coords=coordinates(income.tracts))
+crs(income.net) <- crs(income.tracts)
+
+income.lw <- nb2listw(income.nb, zero.policy = TRUE, style = "W")
+print.listw(income.lw, zero.policy = TRUE)
+
+income.lw
+#Global Moran's I test 
+
+mi <- moran.test(income.tracts$Income, income.lw, zero.policy = TRUE)
+mi
+
+#local moran's I 
+mI <- mi$estimate[[1]]
+eI <- mi$estimate[[2]]
+var <- mi$estimate[[3]]
+z <- (mI-eI)/(sqrt(var))
+
+z <- signif(z,digits=3)
+mI <- signif(mI, digits=3)
+eI <- signif(eI,digits=3)
+var<- signif(var, digits=3)
+
+#make a table of these results
+data.for.table2 = data.frame(mI, eI, z)
+table2 <- tableGrob(data.for.table2, rows=c("")) #make a table "Graphical Object" (GrOb) 
+t2Caption <- textGrob("Table 3: Global Moran's I Results for 2016 \n  Median Income in Metro Vancouver", gp = gpar(fontsize = 09))
+padding <- unit(5, "mm")
+
+table2 <- gtable_add_rows(table2, 
+                          heights = grobHeight(t2Caption) + padding, 
+                          pos = 0)
+
+table2 <- gtable_add_grob(table2,
+                          t2Caption, t = 1, l = 2, r=ncol(data.for.table2) + 1)
+
+grid.arrange(table2, newpage = TRUE)
+#local moran's I test
+lisa.test <- localmoran(income.tracts$Income, income.lw, zero.policy = TRUE)
+#Create columns in the dataset for lisa.test results
+income.tracts$Ii <- lisa.test[,1]
+income.tracts$E.Ii<- lisa.test[,2]
+income.tracts$Var.Ii<- lisa.test[,3]
+income.tracts$Z.Ii<- lisa.test[,4]
+income.tracts$P<- lisa.test[,5]
+summary(lisa.test)
+#map results
+map_LISA <- tm_shape(income.tracts) + 
+  tm_polygons(col = "Z.Ii", 
+              title = "Z Value", 
+              style = "fixed", 
+              auto.palette.mapping=FALSE,
+              palette = "RdBu", breaks = c(-Inf, -1.96, 1.96, Inf ), zero.policy=TRUE)+
+  tm_layout(bg.color = "grey85")
+map_LISA
+######################################################################################
+grd <- as.data.frame(spsample(pm25, "regular", n=50000))
+names(grd)       <- c("X", "Y")
+coordinates(grd) <- c("X", "Y")
+# Create SpatialPixel object:
+gridded(grd)     <- TRUE  
+# Create SpatialGrid object:
+fullgrid(grd)    <- TRUE  
+#Reproject the grid:
+proj4string(grd) <- proj4string(income.tracts)
+#kriging
+pm2.5 <- as.matrix(pm25$PM25)
+#do i need this first line?
+f.0 <- as.formula(PM25 ~ 1) 
+
+#Create variogram
+var.smpl <- variogram(f.0, pm25, cloud = FALSE, cutoff = 40000)
+dat.fit  <- fit.variogram(var.smpl, fit.ranges = FALSE, fit.sills = FALSE,
+                          vgm(psill=0.03, model="Sph", range=27000, nugget=0))
+plot(var.smpl, dat.fit)
+
+
+# Perform the krige interpolation (note the use of the variogram model
+# created in the earlier step)
+dat.krg <- krige(f.0, pm25, grd, dat.fit)
+
+# Convert kriged surface to a raster object for clipping
+r <- raster(dat.krg)
+r.m1 <- mask(r, income.tracts)
+
+tm_shape(r.m1) + 
+  tm_raster(n=10, palette="-RdBu",  
+            title="Predicted PM 2.5 \n(in ppm)") +
+  tm_shape(pm25) + tm_dots(size=0.1) +
+  tm_legend(legend.outside=TRUE)
+
+r   <- raster(dat.krg, layer="var1.var")
+r.m2 <- mask(r, income.tracts)
+
+tm_shape(r.m2) + 
+  tm_raster(n=7, palette ="Reds",
+            title="Variance map \n(in squared ppm)") +tm_shape(pm25) + tm_dots(size=0.2) +
+  tm_legend(legend.outside=TRUE)
+
+r   <- sqrt(raster(dat.krg, layer="var1.var")) * 1.96
+r.m3 <- mask(r, income.tracts)
+
+tm_shape(r.m3) + 
+  tm_raster(n=7, palette ="-Reds",
+            title="95% CI map \n(in ppm)") +tm_shape(pm25) + tm_dots(size=0.1) +
+  tm_legend(legend.outside=TRUE)
+
+#If you have too many cells, 
+#you can reduce the number by aggregating values
+#agg <- aggregate(yourRasterFromKriging, fact=??, fun=mean)
+r <- r.m1
+sufaceMap <- tm_shape(r) + 
+  tm_raster(n=5,palette = "viridis",
+            title="PM 2.5 \n(in ppm)") +
+  tm_shape(pm25) + tm_dots(size=0.2)
+sufaceMap
+
+#Extract average pm2.5 for each polygon
+income.tracts$pm25 <- round(extract(r, income.tracts, fun = mean)[,1], 5)
+######################################################################################
+#6.0--Regression analysis
+
+plot(income.tracts$Income~income.tracts$pm25)
+
+#Notice that there are a lot of 0's in this dataset. If you decide to remove them, use the following line:
+income.tracts.no0 <-  income.tracts[which(income.tracts$pm25 > 0), ]
+
+#Now plot the data again
+plot(income.tracts.no0$Income~income.tracts.no0$pm25)
+
+#Perform a linear regression on the two variables. You should decide which one is dependent.
+lm.model <- lm(income.tracts.no0$Income~income.tracts.no0$pm25)
+#Add the regression model to the plot you created
+plot(income.tracts.no0$Income~income.tracts.no0$pm25)
+abline(lm.model, col = "red")
+#Get the summary of the results
+summary(lm.model)
+
+#add the fitted values to your spatialpolygon dataframe
+income.tracts.no0$predictlm <- lm.model$fitted.values
+
+#You want to determine if the model residuals are spatially clustered. 
+#add the residuals to your spatialpolygon dataframe
+income.tracts.no0$residuals <- residuals.lm(lm.model)
+
+#Observe the result to make sure it looks correct
+head(income.tracts.no0)
+
+#Now, create choropleth map of residuals
+map_resid <- tm_shape(income.tracts.no0) +
+  tm_polygons(col = "residuals",
+              title = "Residuals",
+              style = "jenks",
+              palette = "RdBu", n = 6) +
+  tm_legend(legend.outside=TRUE)+
+  tm_layout(bg.color = "grey85")
+map_resid
+
+#6.2--Global Moran's I on residuals
+residual.nb <- poly2nb(income.tracts.no0)
+residual.net <- nb2lines(residual.nb, coords=coordinates(income.tracts.no0))
+crs(residual.net) <- crs(income.tracts.no0)
+residual.lw <- nb2listw(residual.nb, zero.policy = TRUE, style = "W")
+print.listw(residual.lw, zero.policy = TRUE)
+mi.res <- moran.test(income.tracts.no0$residuals, residual.lw, zero.policy = TRUE)
+mi.res
+#make sure to re-run after previous moran's i
+mI <- mi.res$estimate[[1]]
+eI <- mi.res$estimate[[2]]
+var <- mi.res$estimate[[3]]
+z <- (mI-eI)/(sqrt(var))
+Z <- signif(z,digits=3)
+Observed <- signif(mI, digits=3)
+Expected <- signif(eI,digits=3)
+var<- signif(var, digits=3)
+
+#make a table of these results
+
+data.for.table4 = data.frame(Observed, Expected, Z) 
+table4 <- tableGrob(data.for.table4, rows=c("")) #make a table "Graphical Object" (GrOb) 
+t4Caption <- textGrob("Table 1: Global Moran's I Results \n for income in Vancouver", gp = gpar(fontsize = 09))
+padding <- unit(8, "mm")
+
+table4 <- gtable_add_rows(table4, 
+                          heights = grobHeight(t1Caption) + padding, 
+                          pos = 0)
+
+table1 <- gtable_add_grob(table4,
+                          t1Caption, t = 1, l = 2, r = ncol(data.for.table4) + 1)
+
+grid.arrange(table4, newpage = TRUE)
+######################################################################################
+#7.0 Geographic weighted regression
+####Geographically Weighted Regression
+
+income.tracts.no0.coords <- sp::coordinates(income.tracts.no0)
+#Observe the result:
+head(income.tracts.no0.coords)
+newcols <- c("X","Y")
+colnames(income.tracts.no0.coords) <-newcols
+#Now add the coordinates back to the spatialpolygondataframe
+income.tracts.no0$X <- income.tracts.no0.coords[,1]
+income.tracts.no0$Y <- income.tracts.no0.coords[,2]
+
+###Determine the bandwidth for GWR: this will take a while
+GWRbandwidth <- gwr.sel(income.tracts.no0$Income~income.tracts.no0$pm25, 
+                        data=income.tracts.no0, coords=cbind(income.tracts.no0$X,income.tracts.no0$Y),adapt=T) 
+
+###Perform GWR on the two variables with the bandwidth determined above
+###This will take a looooooong while
+gwr.model = gwr(income.tracts.no0$Income~income.tracts.no0$pm25, 
+                data=income.tracts.no0, coords=cbind(income.tracts.no0$X,income.tracts.no0$Y), 
+                adapt=GWRbandwidth, hatmatrix=TRUE, se.fit=TRUE) 
+
+#Print the results of the model
+gwr.model
+
+#Look at the results in detail
+results<-as.data.frame(gwr.model$SDF)
+head(results)
+
+#Now for the magic. Let's add our local r-square values to the map
+income.tracts.no0$localr <- results$localR2
+
+#Create choropleth map of r-square values
+tmap_mode("plot")
+map_r2 <- tm_shape(income.tracts.no0) +
+  tm_polygons(col = "localr",
+              title = "R2 values",
+              style = "fixed",
+              palette = "Blues", n = 4, breaks = c(0, 0.261, 0.424, 0.591, 0.95))+
+  tm_layout(legend.outside=TRUE)+
+  tm_layout(bg.color = "grey85")
+map_r2
+
+#Time for more magic. Let's map the coefficients
+income.tracts.no0$coeff <- results$income.tracts.no0.pm25
+#Create choropleth map of the coefficients
+map_coef <- tm_shape(income.tracts.no0) +
+  tm_polygons(col = "coeff",
+              title = "Coefficients",
+              style = "fixed",
+              palette = "RdBu", n = 5, breaks = c(-2400000,-600000, 0, 600000,2400000))+
+  tm_layout(legend.outside=TRUE, bg.color = "grey85")
+map_coef
+############################################################################
+#point pattern analysis of sampling structure of pm data
+pm25.n <- as.numeric(pm25$PM25)
+
+pm25.coords <- coordinates(pm25)
+
+pm25.n$x <- pm25.coords[,1]
+pm25.n$y <- pm25.coords[,2]
+
+winExt <- as.matrix(extent(income.tracts))
+window <- as.owin(list(xrange = winExt[1,], yrange = winExt[2,]))
+pm25.n.ppp <-ppp(x=pm25.n$x, y=pm25.n$y,window=window)
+
+
+
+plot(pm25.n.ppp)
+nearestNeighbour <- nndist(pm25.n.ppp)
+pm25.n.ppp$n
+nrow(income.tracts)
+N <- nrow(pm25)
+##Convert the nearestNeighbor object into a dataframe.
+
+##Change the column name to "Distance"
+colnames(nearestNeighbour) = "Distance"
+
+##Calculate the nearest neighbor statistic to test for a random spatial distribution.
+#mean nearest neighbour
+NND = round(((sum(nearestNeighbour))/N), digits=3)
+nearestNeighbour <- nndist(pm25.n.ppp)
+nearestNeighbour=as.data.frame(as.numeric(nearestNeighbour))
+
+#mean nearest neighbour for random spatial distribution
+Windowarea <- gArea(income.tracts)
+studyarea.km <- Windowarea/1000000
+pointDensity <- N/(Windowarea)
+Random = round((1/(2*(sqrt(pointDensity)))), digits=3)
+
+Dispersed = round((1.07453/(sqrt(pointDensity))), digits=3)
+
+R = nnd/r.nnd
+
+SE.NND <- 0.26136/sqrt(N*pointDensity)
+
+z = round(((nnd-r.nnd)/SE.NND), digits=3)
+
+data.for.table5 = data.frame(Random, Dispersed, NND, z)
+table5 <- tableGrob(data.for.table5, rows=c("")) #make a table "Graphical Object" (GrOb) 
+
+
+table5<- gtable_add_rows(table5, 
+                          heights = grobHeight(t5Caption) + padding, 
+                          pos = 0)
+
+table5 <- gtable_add_grob(table5, t = 1, l = 2, r = ncol(data.for.table5) + 1)
+
+grid.arrange(table5, newpage = TRUE)
+##########################################
+#######################################
+#k-function
+k.fun <- Kest(pm25.n.ppp, correction = "Ripley")
+plot(k.fun)
+
+#use simulation to test the point pattern against CSR
+k.fun.e <- envelope(pm25.n.ppp, Kest, nsim = 99, correction = "Ripley")
+plot(k.fun.e)
+################################################
+#the end?
